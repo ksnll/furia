@@ -5,7 +5,7 @@ use serde_bytes::ByteBuf;
 struct Node(String, i64);
 
 #[derive(Debug, Deserialize, Serialize)]
-struct File {
+pub struct File {
     path: Vec<String>,
     length: i64,
     #[serde(default)]
