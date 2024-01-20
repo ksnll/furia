@@ -17,7 +17,7 @@ enum Event {
 #[derive(Debug, Serialize, Deserialize)]
 struct TrackerRequest {
     peer_id: String,
-    port: u32,
+    port: isize,
     uploaded: usize,
     downloaded: usize,
     left: usize,
@@ -28,21 +28,21 @@ struct TrackerRequest {
 #[derive(Debug, Serialize, Deserialize)]
 struct Peer {
     #[serde(rename = "peer id")]
-    peer_id: String,
+    peer_id: Option<String>,
     ip: String,
-    port: String,
+    port: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TrackerResponse {
     #[serde(rename = "failure reason")]
-    failure_reason: bool,
+    failure_reason: Option<bool>,
     #[serde(rename = "warning message")]
-    warning_message: bool,
+    warning_message: Option<bool>,
     /// Interval in seconds that the client should wait between sending regular requests to the tracker
     interval: u32,
     #[serde(rename = "tracker id")]
-    tracker_id: String,
+    tracker_id: Option<String>,
     complete: u32,
     incomplete: u32,
     peers: Vec<Peer>,
@@ -86,7 +86,6 @@ pub async fn request_tracker(torrent: &TorrentFile) -> Result<TrackerResponse> {
     let client = reqwest::Client::new();
     let response = client.get(url).query(&tracker_request).send().await?;
     let body = response.text().await?;
-    dbg!(&body);
     let response: TrackerResponse = serde_bencode::from_str::<TrackerResponse>(&body)?;
     Ok(response)
 }

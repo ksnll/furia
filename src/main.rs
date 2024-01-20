@@ -15,5 +15,6 @@ async fn main() -> Result<()> {
     }
     let torrent = parse_torrent(&args[1]);
     let res = request_tracker(&torrent).await?;
+    dbg!(&res);
     Ok(())
 }
