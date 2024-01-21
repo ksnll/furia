@@ -25,12 +25,12 @@ struct TrackerRequest {
     no_peer_id: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct Peer {
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Peer {
     #[serde(rename = "peer id")]
-    peer_id: Option<String>,
-    ip: String,
-    port: i64,
+    pub peer_id: Option<String>,
+    pub ip: String,
+    pub port: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -45,15 +45,20 @@ pub struct TrackerResponse {
     tracker_id: Option<String>,
     complete: u32,
     incomplete: u32,
-    peers: Vec<Peer>,
+    pub peers: Vec<Peer>,
 }
 
-fn get_encoded_info_hash(info: &Info) -> Result<String> {
+pub fn get_info_hash(info: &Info) -> Result<Vec<u8>> {
     let mut hasher = Sha1::new();
     let info_hash = serde_bencode::to_bytes(info)?;
     hasher.update(info_hash);
     let info_hash = hasher.finalize();
     let info_hash: Vec<u8> = info_hash.as_slice().into();
+    Ok(info_hash)
+}
+
+pub fn get_encoded_info_hash(info: &Info) -> Result<String> {
+    let info_hash = get_info_hash(&info)?; // Vec<u8>
     let info_hash = info_hash
         .into_iter()
         .map(percent_encode_byte)
