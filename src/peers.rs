@@ -9,27 +9,10 @@ use crate::{
     tracker::{get_info_hash, Peer},
 };
 
+
 pub enum PeerStatus {
     Chocked,
     Interested,
-}
-
-pub enum PeerConnectionState {
-    Handshake,
-    Data,
-    Closed,
-    Error,
-    Uninitialized,
-    Connected,
-}
-
-pub struct PeerConnection {
-    peer: Peer,
-    am_status: Option<PeerStatus>,
-    peer_status: Option<PeerStatus>,
-    connection: TcpStream,
-    peer_connection_state: PeerConnectionState,
-    bitfield: Vec<u8>,
 }
 
 pub struct ConnectionManager<'a> {
@@ -61,6 +44,13 @@ impl<'a> ConnectionManager<'a> {
     }
 }
 
+pub struct PeerConnection {
+    peer: Peer,
+    am_status: Option<PeerStatus>,
+    peer_status: Option<PeerStatus>,
+    connection: TcpStream,
+    bitfield: Vec<u8>,
+}
 impl PeerConnection {
     fn new(peer: Peer) -> Result<Self> {
         dbg!("Connectiong to peer: {:?}", &peer);
@@ -70,7 +60,6 @@ impl PeerConnection {
             connection,
             am_status: None,
             peer_status: None,
-            peer_connection_state: PeerConnectionState::Uninitialized,
             bitfield: Vec::new(),
         })
     }
@@ -90,18 +79,16 @@ impl PeerConnection {
         let mut response = vec![0; total_length as usize];
         self.connection.read_exact(&mut response)?;
         if &response[0..19] != "BitTorrent protocol".as_bytes() {
-            self.peer_connection_state = PeerConnectionState::Error;
             return Err(anyhow!("Invalid protocol"));
         }
         if &response[27..47] != info_hash.as_slice() {
-            self.peer_connection_state = PeerConnectionState::Error;
             return Err(anyhow!(
                 "Invalid info hash {} {}",
                 hex::encode(&response[27..47]),
                 hex::encode(info_hash.as_slice())
             ));
         }
-        self.peer_connection_state = PeerConnectionState::Connected;
+        self.am_status = Some(PeerStatus::Chocked);
         Ok(())
     }
 
@@ -112,7 +99,7 @@ impl PeerConnection {
         let bitfield_size = ((number_of_pieces + 7) / 8) as usize;
 
         concatenated_bytes
-            .write_all(&((bitfield_size as u8+ 1)).to_be_bytes())
+            .write_all(&(bitfield_size as u8 + 1).to_be_bytes())
             .expect("Failed to write number of bytes");
         concatenated_bytes
             .write_all(&5_u32.to_be_bytes())
@@ -163,7 +150,6 @@ impl PeerConnection {
             .write_all(&16384_u32.to_be_bytes())
             .expect("Failed to write number of bytes");
         self.connection.write_all(&concatenated_bytes)?;
-
 
         let mut response = vec![0; 16];
         self.connection.read_exact(&mut response)?;
