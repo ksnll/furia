@@ -68,13 +68,13 @@ mod test {
 
     #[test]
     fn it_parses_a_torrent_file() {
-        let torrent = parse_torrent("./data/centos-6.5.torrent");
+        let torrent = parse_torrent("./data/ubuntu-22.04.3-live-server-amd64.iso.torrent");
         assert_eq!(
-            "http://linuxtracker.org:2710/00000000000000000000000000000000/announce",
+            "https://torrent.ubuntu.com/announce",
             torrent.announce
         );
-        assert_eq!(Some(1385853586), torrent.creation_date);
-        assert_eq!("CentOS-6.5-x86_64-minimal", torrent.info.name);
-        assert_eq!(524288, torrent.info.piece_length);
+        assert_eq!(Some(1691692385), torrent.creation_date);
+        assert_eq!("ubuntu-22.04.3-live-server-amd64.iso", torrent.info.name);
+        assert_eq!(262144, torrent.info.piece_length);
     }
 }
