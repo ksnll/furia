@@ -62,6 +62,12 @@ pub fn parse_torrent(file_path: &str) -> TorrentFile {
     serde_bencode::from_bytes(&torrent_file).expect("Unable to parse torrent file")
 }
 
+pub fn bitfield_size(torrent: &TorrentFile) -> u32 {
+    let number_of_pieces = ((torrent.info.length.unwrap() + torrent.info.piece_length - 1)
+        / torrent.info.piece_length) as usize;
+    ((number_of_pieces + 7) / 8) as u32
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

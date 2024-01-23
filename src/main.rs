@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let tracker_response = request_tracker(&torrent).await?;
     let download = Download::from(&torrent);
 
-    let mut connection_manager = ConnectionManager::new(&torrent);
+    let mut connection_manager = ConnectionManager::new(&torrent, download);
     connection_manager.add_peer(tracker_response.peers[0].clone())?;
     connection_manager.connect_to_peers()?;
 

@@ -1,7 +1,8 @@
 use anyhow::Result;
 use percent_encoding::percent_encode_byte;
-use rand::{Rng, distributions::Alphanumeric};
+use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
+use serde_bytes::ByteArray;
 use sha1::{Digest, Sha1};
 use url::Url;
 
@@ -33,7 +34,7 @@ pub struct Peer {
     pub port: i64,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct TrackerResponse {
     #[serde(rename = "failure reason")]
     failure_reason: Option<bool>,
@@ -45,9 +46,35 @@ pub struct TrackerResponse {
     tracker_id: Option<String>,
     complete: u32,
     incomplete: u32,
+    #[serde(with = "peer_list")]
     pub peers: Vec<Peer>,
 }
 
+mod peer_list {
+    use super::Peer;
+    use serde::{Deserialize, Deserializer};
+    use serde_bytes::ByteArray;
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Peer>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes: ByteArray<6> = Deserialize::deserialize(deserializer)?;
+        let mut peers = Vec::new();
+        for chunk in bytes.chunks(6) {
+            if chunk.len() == 6 {
+                let ip = format!("{}.{}.{}.{}", chunk[0], chunk[1], chunk[2], chunk[3]);
+                let port = ((chunk[4] as i64) << 8) | chunk[5] as i64;
+                peers.push(Peer {
+                    peer_id: None,
+                    ip,
+                    port,
+                });
+            }
+        }
+        Ok(peers)
+    }
+}
 pub fn get_info_hash(info: &Info) -> Result<Vec<u8>> {
     let mut hasher = Sha1::new();
     let info_hash = serde_bencode::to_bytes(info)?;
@@ -90,8 +117,8 @@ pub async fn request_tracker(torrent: &TorrentFile) -> Result<TrackerResponse> {
 
     let client = reqwest::Client::new();
     let response = client.get(url).query(&tracker_request).send().await?;
-    let body = response.text().await?;
-    let response: TrackerResponse = serde_bencode::from_str::<TrackerResponse>(&body)?;
+    let body = response.bytes().await?;
+    let response: TrackerResponse = serde_bencode::from_bytes::<TrackerResponse>(&body)?;
     Ok(response)
 }
 

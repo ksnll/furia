@@ -5,10 +5,10 @@ use std::{
 };
 
 use crate::{
-    parse_torrent::TorrentFile,
-    tracker::{get_info_hash, Peer},
+    messages::Message,
+    parse_torrent::{TorrentFile, bitfield_size},
+    tracker::{get_info_hash, Peer}, download::Download,
 };
-
 
 pub enum PeerStatus {
     Chocked,
@@ -18,13 +18,15 @@ pub enum PeerStatus {
 pub struct ConnectionManager<'a> {
     connections: Vec<PeerConnection>,
     torrent: &'a TorrentFile,
+    download: Download,
 }
 
 impl<'a> ConnectionManager<'a> {
-    pub fn new(torrent: &'a TorrentFile) -> Self {
+    pub fn new(torrent: &'a TorrentFile, download: Download) -> Self {
         Self {
             connections: Vec::new(),
             torrent,
+            download,
         }
     }
 
@@ -37,8 +39,8 @@ impl<'a> ConnectionManager<'a> {
     pub fn connect_to_peers(&mut self) -> Result<()> {
         for connection in &mut self.connections {
             connection.handshake(&self.torrent)?;
-            connection.bitfield(&self.torrent)?;
-            // connection.interested(0)?;
+            connection.bitfield(&self.torrent, &self.download)?;
+            connection.interested()?;
         }
         Ok(())
     }
@@ -51,6 +53,7 @@ pub struct PeerConnection {
     connection: TcpStream,
     bitfield: Vec<u8>,
 }
+
 impl PeerConnection {
     fn new(peer: Peer) -> Result<Self> {
         dbg!("Connectiong to peer: {:?}", &peer);
@@ -92,43 +95,15 @@ impl PeerConnection {
         Ok(())
     }
 
-    fn bitfield(&mut self, torrent: &TorrentFile) -> Result<()> {
-        let mut concatenated_bytes = Vec::new();
-        let number_of_pieces = ((torrent.info.length.unwrap() + torrent.info.piece_length - 1)
-            / torrent.info.piece_length) as usize;
-        let bitfield_size = ((number_of_pieces + 7) / 8) as usize;
-
-        concatenated_bytes
-            .write_all(&(bitfield_size as u8 + 1).to_be_bytes())
-            .expect("Failed to write number of bytes");
-        concatenated_bytes
-            .write_all(&5_u32.to_be_bytes())
-            .expect("Failed to write number of bytes");
-        concatenated_bytes
-            .write_all(&vec![0; bitfield_size])
-            .expect("Failed to write number of bytes");
-        self.connection.write_all(&concatenated_bytes)?;
-        let mut response = vec![0; bitfield_size as usize];
-        self.connection.read_exact(&mut response)?;
-        dbg!(hex::encode(&response[0..20]));
-        // self.bitfield = response;
+    fn bitfield(&mut self, torrent: &TorrentFile, download: &Download) -> Result<()> {
+        let message = Message::bitfield(&torrent, &download);
+        self.connection.write_all(&message)?;
         Ok(())
     }
 
-    fn interested(&mut self, index: u32) -> Result<()> {
-        let mut concatenated_bytes = Vec::new();
-        concatenated_bytes
-            .write_all(&1_u32.to_be_bytes())
-            .expect("Failed to write number of bytes");
-        concatenated_bytes
-            .write_all(&2_u8.to_be_bytes())
-            .expect("Failed to write number of bytes");
-        self.connection.write_all(&concatenated_bytes)?;
-
-        let mut response = vec![0; 16];
-        self.connection.read_exact(&mut response)?;
-
-        dbg!(&response);
+    fn interested(&mut self) -> Result<()> {
+        let message = Message::interested();
+        self.connection.write_all(&message)?;
         Ok(())
     }
 

@@ -1,4 +1,4 @@
-use crate::{download::Download, parse_torrent::TorrentFile};
+use crate::{download::Download, parse_torrent::{TorrentFile, bitfield_size}};
 
 pub struct Message {}
 
@@ -48,14 +48,12 @@ impl Message {
     }
 
     pub fn bitfield(torrent: &TorrentFile, download: &Download) -> Vec<u8> {
-        let number_of_pieces = ((torrent.info.length.unwrap() + torrent.info.piece_length - 1)
-            / torrent.info.piece_length) as usize;
-        let bitfield_size = ((number_of_pieces + 7) / 8) as u32;
+        let bitfield_size = bitfield_size(&torrent);
 
-        let len = bitfield_size as usize + 1;
+        let len = bitfield_size as u32 + 1;
         let mut message = Vec::from(len.to_be_bytes());
         message.push(MessageType::Bitfield as u8);
-        message.extend_from_slice(&vec![0_u8; len]);
+        message.extend_from_slice(&vec![0_u8; len as usize * 4]);
         message
     }
 
@@ -85,12 +83,16 @@ impl Message {
     }
 }
 
+
 #[cfg(test)]
 mod test {
     use super::Message;
 
+    #[test]
     fn request_message() {
-        let expected = vec![0x0 0x0, 0x0, 0xC]
-        Message::request(0, 0);
+        assert_eq!(
+            Message::request(0, 0),
+            vec![0x00, 0x00, 0x00, 0x0D, 0x06, 0x00, 0x00, 0x0C]
+        );
     }
 }
