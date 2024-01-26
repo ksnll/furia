@@ -25,6 +25,7 @@ async fn main() -> Result<()> {
     let mut connection_manager = ConnectionManager::new(&torrent, download);
     connection_manager.add_peer(tracker_response.peers[0].clone())?;
     connection_manager.connect_to_peers()?;
+    connection_manager.handle_messages().await?;
 
     Ok(())
 }

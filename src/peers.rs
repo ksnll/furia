@@ -1,13 +1,15 @@
 use anyhow::{anyhow, Result};
 use std::{
+    future::Future,
     io::{Read, Write},
     net::TcpStream,
 };
 
 use crate::{
+    download::Download,
     messages::Message,
-    parse_torrent::{TorrentFile, bitfield_size},
-    tracker::{get_info_hash, Peer}, download::Download,
+    parse_torrent::{bitfield_size, TorrentFile},
+    tracker::{get_info_hash, Peer},
 };
 
 pub enum PeerStatus {
@@ -41,6 +43,49 @@ impl<'a> ConnectionManager<'a> {
             connection.handshake(&self.torrent)?;
             connection.bitfield(&self.torrent, &self.download)?;
             connection.interested()?;
+        }
+        Ok(())
+    }
+
+    pub async fn handle_messages(self) -> Result<()> {
+        for mut connection in self.connections {
+            tokio::spawn(async move {
+                loop {
+                    let mut len = [0; 4];
+                    connection.connection.read_exact(&mut len).unwrap();
+                    let length = u32::from_be_bytes(len);
+                    let mut message = vec![0; length as usize];
+                    connection.connection.read_exact(&mut message).unwrap();
+                    if length == 0 {
+                        dbg!("Keep alive");
+                        continue;
+                    }
+                    let message_id = message[0];
+                    match message_id {
+                        0 => {
+                            dbg!("Choke");
+                            connection.am_status = Some(PeerStatus::Chocked);
+                        }
+                        1 => {
+                            dbg!("Unchoke");
+                            connection.am_status = Some(PeerStatus::Interested);
+                        }
+                        4 => {
+                            dbg!("Have");
+                        }
+                        5 => {
+                            dbg!("Bitfield");
+                            connection.bitfield = message[1..].to_vec();
+                        }
+                        7 => {
+                            dbg!("Piece");
+                        }
+                        _ => {
+                            dbg!("Unknown message");
+                        }
+                    }
+                }
+            });
         }
         Ok(())
     }
