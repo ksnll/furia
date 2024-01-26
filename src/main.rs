@@ -1,13 +1,13 @@
-mod parse_torrent;
-mod tracker;
-mod peers;
 mod messages;
+mod parse_torrent;
+mod peers;
+mod tracker;
 use crate::download::Download;
-use std::env;
-use parse_torrent::parse_torrent;
-use tracker::request_tracker;
-use peers::ConnectionManager;
 use anyhow::Result;
+use parse_torrent::parse_torrent;
+use peers::ConnectionManager;
+use std::env;
+use tracker::request_tracker;
 
 pub mod download;
 
@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let tracker_response = request_tracker(&torrent).await?;
     let download = Download::from(&torrent);
 
-    let mut connection_manager = ConnectionManager::new(&torrent, download);
+    let mut connection_manager = ConnectionManager::new(torrent, download);
 
     for peer in tracker_response.peers.into_iter().take(5) {
         connection_manager.add_peer(peer)?;

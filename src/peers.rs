@@ -1,9 +1,10 @@
 use anyhow::{anyhow, Result};
-use tokio::sync::Mutex;
 use std::{
     io::{Read, Write},
-    net::TcpStream, sync::Arc,
+    net::TcpStream,
+    sync::Arc,
 };
+use tokio::sync::Mutex;
 
 use crate::{
     download::Download,
@@ -17,16 +18,16 @@ pub enum PeerStatus {
     Interested,
 }
 
-pub struct ConnectionManager<'a> {
-    torrent: &'a TorrentFile,
+pub struct ConnectionManager {
+    torrent: Arc<TorrentFile>,
     download: Arc<Mutex<Download>>,
     peer_connections: Vec<PeerConnection>,
 }
 
-impl<'a> ConnectionManager<'a> {
-    pub fn new(torrent: &'a TorrentFile, download: Download) -> Self {
+impl ConnectionManager {
+    pub fn new(torrent: TorrentFile, download: Download) -> Self {
         Self {
-            torrent,
+            torrent: Arc::new(torrent),
             download: Arc::new(Mutex::new(download)),
             peer_connections: Vec::new(),
         }
@@ -49,21 +50,21 @@ impl<'a> ConnectionManager<'a> {
             let torrent = torrent.clone();
             let task = tokio::spawn(async move {
                 loop {
-                    if let Err(e) = peer_connection.connect(){
+                    if let Err(e) = peer_connection.connect() {
                         dbg!("Failed to connect to peer: {}", e);
                         break;
                     }
-                    if let Err(e) = peer_connection.handshake(&info_hash){
+                    if let Err(e) = peer_connection.handshake(&info_hash) {
                         dbg!("Failed to handshake to peer: {}", e);
                         break;
                     }
 
                     let download = download.lock().await;
-                    if let Err(e) = peer_connection.bitfield(&torrent, &download){
+                    if let Err(e) = peer_connection.bitfield(&torrent, &download) {
                         dbg!("Failed to handshake to peer: {}", e);
                         break;
                     }
-                    
+
                     if let Err(e) = peer_connection.interested() {
                         dbg!("Failed to send interest message to peer: {}", e);
                         break;
@@ -71,7 +72,7 @@ impl<'a> ConnectionManager<'a> {
                     let mut len = [0; 4];
                     if let Some(connection) = peer_connection.connection.as_mut() {
                         dbg!("Connection established and hadshake successfull");
-                        let mut one = [0_u8;1];
+                        let mut one = [0_u8; 1];
                         connection.read_exact(&mut one).unwrap();
                         dbg!("One byte read");
                         dbg!(one);
