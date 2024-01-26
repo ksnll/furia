@@ -1,4 +1,6 @@
 use crate::parse_torrent::TorrentFile;
+
+#[derive(Debug, Clone)]
 pub enum PieceStatus {
     NotStarted,
     Downloading,
@@ -7,12 +9,14 @@ pub enum PieceStatus {
     WrittenToDisk,
 }
 
+#[derive(Debug, Clone)]
 pub struct Piece {
     pub content: Option<Vec<u8>>,
     pub status: PieceStatus,
     pub original_sha1: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
 pub struct Download {
     pub pieces: Vec<Piece>,
 }

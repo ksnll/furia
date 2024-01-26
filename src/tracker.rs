@@ -2,7 +2,6 @@ use anyhow::Result;
 use percent_encoding::percent_encode_byte;
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
-use serde_bytes::ByteArray;
 use sha1::{Digest, Sha1};
 use url::Url;
 
@@ -44,8 +43,8 @@ pub struct TrackerResponse {
     interval: u32,
     #[serde(rename = "tracker id")]
     tracker_id: Option<String>,
-    complete: u32,
-    incomplete: u32,
+    complete: Option<u32>,
+    incomplete: Option<u32>,
     #[serde(with = "peer_list")]
     pub peers: Vec<Peer>,
 }
@@ -53,13 +52,14 @@ pub struct TrackerResponse {
 mod peer_list {
     use super::Peer;
     use serde::{Deserialize, Deserializer};
-    use serde_bytes::ByteArray;
+    use serde_bytes::{ByteArray, ByteBuf};
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Peer>, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let bytes: ByteArray<6> = Deserialize::deserialize(deserializer)?;
+        let bytes: ByteBuf = Deserialize::deserialize(deserializer)?;
+
         let mut peers = Vec::new();
         for chunk in bytes.chunks(6) {
             if chunk.len() == 6 {
@@ -72,15 +72,16 @@ mod peer_list {
                 });
             }
         }
+        println!("Found {} peers", peers.len());
         Ok(peers)
     }
 }
-pub fn get_info_hash(info: &Info) -> Result<Vec<u8>> {
+pub fn get_info_hash(info: &Info) -> Result<[u8; 20]> {
     let mut hasher = Sha1::new();
     let info_hash = serde_bencode::to_bytes(info)?;
     hasher.update(info_hash);
     let info_hash = hasher.finalize();
-    let info_hash: Vec<u8> = info_hash.as_slice().into();
+    let info_hash = info_hash.as_slice().try_into().unwrap();
     Ok(info_hash)
 }
 
