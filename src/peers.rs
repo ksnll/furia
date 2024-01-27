@@ -77,7 +77,7 @@ impl ConnectionManager {
                         match connection.take(4).read_to_end(&mut len) {
                             Ok(_) => {
                                 if len.len() != 4 {
-                                    dbg!("Failed to read data from the peer: {}", len.len());
+                                    println!("Failed to read data from peer {}", &peer_connection.peer.ip);
                                     return;
                                 }
                                 let length = u32::from_be_bytes(len.try_into().unwrap());
@@ -85,7 +85,7 @@ impl ConnectionManager {
 
                                 connection.read_exact(&mut message).unwrap();
                                 if length == 0 {
-                                    dbg!("Keep alive");
+                                    peer_connection.keep_alive().unwrap();
                                     continue;
                                 }
                                 let message_id = message[0];
@@ -96,8 +96,8 @@ impl ConnectionManager {
                                     }
                                     1 => {
                                         println!("Unchoke from peer {}", &peer_connection.peer.ip);
-                                        peer_connection.request(0,0).unwrap();
                                         peer_connection.am_status = Some(PeerStatus::Interested);
+                                        peer_connection.request(0,0).unwrap();
                                     }
                                     4 => {
                                         println!("Have");
@@ -105,6 +105,8 @@ impl ConnectionManager {
                                     5 => {
                                         println!("Bitfield from peer {}", &peer_connection.peer.ip);
                                         peer_connection.bitfield = message[1..].to_vec();
+                                        dbg!(&peer_connection.bitfield[0]);
+                                        peer_connection.interested().unwrap();
                                         // peer_connection.request(0, 0).unwrap();
                                     }
                                     7 => {
@@ -187,6 +189,14 @@ impl PeerConnection {
 
     fn bitfield(&mut self, torrent: &TorrentFile, download: &Download) -> Result<()> {
         let message = Message::bitfield(&torrent, &download);
+        if let Some(connection) = &mut self.connection {
+            connection.write_all(&message)?;
+        }
+        Ok(())
+    }
+
+    fn keep_alive(&mut self) -> Result<()> {
+        let message = Message::keep_alive();
         if let Some(connection) = &mut self.connection {
             connection.write_all(&message)?;
         }

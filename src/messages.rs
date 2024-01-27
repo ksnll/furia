@@ -1,4 +1,7 @@
-use crate::{download::Download, parse_torrent::{TorrentFile, bitfield_size}};
+use crate::{
+    download::Download,
+    parse_torrent::{bitfield_size, TorrentFile},
+};
 
 pub struct Message {}
 
@@ -16,9 +19,15 @@ pub enum MessageType {
     Piece,
     Cancel,
     Port,
+    KeepAlive
 }
 
 impl Message {
+    pub fn keep_alive() -> Vec<u8> {
+        let len = 0_u32.to_be_bytes();
+        Vec::from(len)
+    }
+
     pub fn choke() -> Vec<u8> {
         let len = 0_u32.to_be_bytes();
         let mut message = Vec::from(len);
@@ -61,11 +70,9 @@ impl Message {
         let len = 13_u32.to_be_bytes();
         let mut message = Vec::from(len);
         message.push(MessageType::Request as u8);
-        message.extend_from_slice(&piece_index.to_le_bytes());
-        message.extend_from_slice(&(piece_offset * BLOCK_BYTES as u32).to_le_bytes());
-        message.extend_from_slice(&(piece_offset * (BLOCK_BYTES as u32 +1)).to_le_bytes());
-        message.extend_from_slice(&BLOCK_BYTES.to_le_bytes());
-        dbg!(&message);
+        message.extend_from_slice(&piece_index.to_be_bytes());
+        message.extend_from_slice(&(piece_offset * BLOCK_BYTES as u32).to_be_bytes());
+        message.extend_from_slice(&BLOCK_BYTES.to_be_bytes());
         message
     }
 
@@ -84,7 +91,6 @@ impl Message {
         todo!();
     }
 }
-
 
 #[cfg(test)]
 mod test {
