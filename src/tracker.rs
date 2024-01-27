@@ -94,18 +94,11 @@ pub fn get_encoded_info_hash(info: &Info) -> Result<String> {
     Ok(info_hash)
 }
 
-pub async fn request_tracker(torrent: &TorrentFile) -> Result<TrackerResponse> {
+pub async fn request_tracker(torrent: &TorrentFile, peer_id: &str) -> Result<TrackerResponse> {
     let info_hash = get_encoded_info_hash(&torrent.info)?;
 
     let tracker_request = TrackerRequest {
-        peer_id: format!(
-            "-FU0001-{}",
-            rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(12)
-                .map(char::from)
-                .collect::<String>()
-        ),
+        peer_id: peer_id.to_owned(),
         port: 6881,
         uploaded: 0,
         downloaded: 0,

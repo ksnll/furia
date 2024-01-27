@@ -2,7 +2,7 @@ use crate::{download::Download, parse_torrent::{TorrentFile, bitfield_size}};
 
 pub struct Message {}
 
-pub const BLOCK_BYTES: u8 = 2 ^ 14;
+pub const BLOCK_BYTES: u32 = 16384;
 
 #[repr(u8)]
 pub enum MessageType {
@@ -57,13 +57,15 @@ impl Message {
         message
     }
 
-    pub fn request(piece_index: u8, piece_offset: u8) -> Vec<u8> {
+    pub fn request(piece_index: u32, piece_offset: u32) -> Vec<u8> {
         let len = 13_u32.to_be_bytes();
         let mut message = Vec::from(len);
         message.push(MessageType::Request as u8);
-        message.push(piece_index);
-        message.push(piece_offset * BLOCK_BYTES);
-        message.push(BLOCK_BYTES);
+        message.extend_from_slice(&piece_index.to_le_bytes());
+        message.extend_from_slice(&(piece_offset * BLOCK_BYTES as u32).to_le_bytes());
+        message.extend_from_slice(&(piece_offset * (BLOCK_BYTES as u32 +1)).to_le_bytes());
+        message.extend_from_slice(&BLOCK_BYTES.to_le_bytes());
+        dbg!(&message);
         message
     }
 

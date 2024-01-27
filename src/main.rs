@@ -5,6 +5,7 @@ mod messages;
 use crate::download::Download;
 use std::env;
 use parse_torrent::parse_torrent;
+use rand::{distributions::Alphanumeric, Rng};
 use tracker::request_tracker;
 use peers::ConnectionManager;
 use anyhow::Result;
@@ -19,16 +20,28 @@ async fn main() -> Result<()> {
         return Ok(());
     }
     let torrent = parse_torrent(&args[1]);
-    let tracker_response = request_tracker(&torrent).await?;
+
+    let peer_id = format!(
+            "-FU0001-{}",
+            rand::thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(12)
+                .map(char::from)
+                .collect::<String>()
+        );
+    let tracker_response = request_tracker(&torrent, &peer_id).await?;
     let download = Download::from(&torrent);
 
-    let mut connection_manager = ConnectionManager::new(&torrent, download);
+    let mut connection_manager = ConnectionManager::new(torrent, download, &peer_id);
 
-    for peer in tracker_response.peers.into_iter().take(5) {
+    for peer in tracker_response.peers.into_iter().take(1) {
         connection_manager.add_peer(peer)?;
     }
     // connection_manager.connect_to_peers()?;
-    connection_manager.handle_messages().await?;
+    let tasks = connection_manager.handle_messages().await?;
+    for task in tasks {
+        task.await?;
+    }
 
     Ok(())
 }
