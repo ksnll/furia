@@ -9,10 +9,16 @@ pub enum PieceStatus {
     WrittenToDisk,
 }
 
-type Block = [u8; BLOCK_BYTES as usize];
+#[derive(Debug, Clone, PartialEq)]
+pub enum Block {
+    NotStarted,
+    Downloaded([u8; BLOCK_BYTES as usize]),
+    Downloading,
+}
+
 #[derive(Debug, Clone)]
 pub struct Piece {
-    pub content: Option<Vec<Option<Block>>>,
+    pub content: Option<Vec<Block>>,
     pub status: PieceStatus,
     pub original_sha1: Vec<u8>,
 }
@@ -42,7 +48,7 @@ impl Download {
         for (piece_index, piece) in self.pieces.iter().enumerate() {
             if let Some(blocks) = &piece.content {
                 for (block_index, block) in blocks.iter().enumerate() {
-                    if block.is_none() {
+                    if *block == Block::NotStarted {
                         return Some((piece_index, block_index));
                     }
                 }
