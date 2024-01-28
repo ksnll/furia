@@ -1,13 +1,15 @@
 use anyhow::{anyhow, Result};
+use sha1::{Digest, Sha1};
 use std::{
     io::{Read, Write},
     net::TcpStream,
     sync::Arc,
 };
+use tokio::{fs::OpenOptions, io::AsyncWriteExt, sync::Mutex};
 
 use crate::{
-    download::Download,
-    messages::Message,
+    download::{Download, PieceStatus},
+    messages::{Message, BLOCK_BYTES},
     parse_torrent::TorrentFile,
     tracker::{get_info_hash, Peer},
 };
@@ -19,7 +21,7 @@ pub enum PeerStatus {
 
 pub struct ConnectionManager {
     torrent: Arc<TorrentFile>,
-    download: Arc<Download>,
+    download: Arc<Mutex<Download>>,
     peer_connections: Vec<PeerConnection>,
     peer_id: String,
 }
@@ -28,7 +30,7 @@ impl ConnectionManager {
     pub fn new(torrent: TorrentFile, download: Download, peer_id: &str) -> Self {
         Self {
             torrent: Arc::new(torrent),
-            download: Arc::new(download),
+            download: Arc::new(Mutex::new(download)),
             peer_connections: Vec::new(),
             peer_id: peer_id.to_owned(),
         }
@@ -54,30 +56,34 @@ impl ConnectionManager {
             let peer_id = peer_id.clone();
             let task = tokio::spawn(async move {
                 if let Err(e) = peer_connection.connect() {
-                    dbg!("Failed to connect to peer: {}", e);
+                    println!("Failed to connect to peer: {}", e);
                     return;
                 }
                 if let Err(e) = peer_connection.handshake(&info_hash, &peer_id) {
-                    dbg!("Failed to handshake to peer: {}", e);
+                    println!("Failed to handshake to peer: {}", e);
                     return;
                 }
 
-                if let Err(e) = peer_connection.bitfield(&torrent, &download) {
-                    dbg!("Failed to handshake to peer: {}", e);
-                    return;
-                }
+                // if let Err(e) = peer_connection.bitfield(&torrent, &download) {
+                //     dbg!("Failed to handshake to peer: {}", e);
+                //     return;
+                // }
 
                 if let Err(e) = peer_connection.interested() {
-                    dbg!("Failed to send interest message to peer: {}", e);
+                    println!("Failed to send interest message to peer: {}", e);
                     return;
                 }
+
                 loop {
                     let mut len = Vec::new();
                     if let Some(connection) = peer_connection.connection.as_mut() {
                         match connection.take(4).read_to_end(&mut len) {
                             Ok(_) => {
                                 if len.len() != 4 {
-                                    println!("Failed to read data from peer {}", &peer_connection.peer.ip);
+                                    println!(
+                                        "Failed to read data from peer {}",
+                                        &peer_connection.peer.ip
+                                    );
                                     return;
                                 }
                                 let length = u32::from_be_bytes(len.try_into().unwrap());
@@ -97,7 +103,11 @@ impl ConnectionManager {
                                     1 => {
                                         println!("Unchoke from peer {}", &peer_connection.peer.ip);
                                         peer_connection.am_status = Some(PeerStatus::Interested);
-                                        peer_connection.request(0,0).unwrap();
+                                        let download = download.lock().await;
+                                        let (piece, block) = download.find_first_block().unwrap();
+                                        peer_connection
+                                            .request(piece as u32, block as u32)
+                                            .unwrap();
                                     }
                                     4 => {
                                         println!("Have");
@@ -105,11 +115,83 @@ impl ConnectionManager {
                                     5 => {
                                         println!("Bitfield from peer {}", &peer_connection.peer.ip);
                                         peer_connection.bitfield = message[1..].to_vec();
-                                        dbg!(&peer_connection.bitfield[0]);
                                         peer_connection.interested().unwrap();
-                                        // peer_connection.request(0, 0).unwrap();
                                     }
                                     7 => {
+                                        let piece_index =
+                                            u32::from_be_bytes(message[1..5].try_into().unwrap());
+                                        let piece_offset =
+                                            u32::from_be_bytes(message[5..9].try_into().unwrap());
+                                        dbg!(&piece_index, &piece_offset);
+                                        let block = &message[9..];
+                                        let mut download = download.lock().await;
+                                        if !&download.pieces[piece_index as usize].content.is_some()
+                                        {
+                                            download.pieces[piece_index as usize].content =
+                                                Some(vec![
+                                                    None;
+                                                    (torrent.info.piece_length as u32 / BLOCK_BYTES)
+                                                        as usize
+                                                ]);
+                                        }
+                                        download.pieces[piece_index as usize]
+                                            .content
+                                            .as_mut()
+                                            .unwrap()
+                                            [(piece_offset / BLOCK_BYTES) as usize] =
+                                            Some(block.try_into().unwrap());
+
+                                        if download.pieces[piece_index as usize]
+                                            .content
+                                            .as_ref()
+                                            .unwrap()
+                                            .iter()
+                                            .all(|block| block.is_some())
+                                        {
+                                            download.pieces[piece_index as usize].status =
+                                                PieceStatus::Downloaded;
+                                            let data = download.pieces[piece_index as usize]
+                                                .content
+                                                .as_ref()
+                                                .unwrap()
+                                                .iter()
+                                                .map(|block| block.as_ref().unwrap())
+                                                .flatten()
+                                                .cloned()
+                                                .collect::<Vec<u8>>();
+
+                                            let mut hasher = Sha1::new();
+                                            hasher.update(&data);
+                                            let info_hash = hasher.finalize();
+
+                                            if info_hash.as_slice()
+                                                == download.pieces[piece_index as usize]
+                                                    .original_sha1
+                                                    .as_slice()
+                                            {
+                                                download.pieces[piece_index as usize].status =
+                                                    PieceStatus::ShaVerified;
+
+                                                dbg!(&torrent.info.name);
+                                                let mut file = OpenOptions::new()
+                                                    .create(true)
+                                                    .append(true)
+                                                    .open(&torrent.info.name)
+                                                    .await
+                                                    .unwrap();
+                                                file.write_all(&data).await.unwrap();
+                                            } else {
+                                                dbg!("Sha1 mismatch");
+                                                download.pieces.remove(piece_index as usize);
+                                            }
+
+                                            println!("Piece {} downloaded", &piece_index);
+                                        }
+
+                                        let (piece, block) = download.find_first_block().unwrap();
+                                        peer_connection
+                                            .request(piece as u32, block as u32)
+                                            .unwrap();
                                         println!("Piece");
                                     }
                                     20 => {
@@ -162,8 +244,7 @@ impl PeerConnection {
 
     fn handshake(&mut self, info_hash: &[u8; 20], peer_id: &str) -> Result<()> {
         let mut concatenated_bytes = Vec::new();
-        concatenated_bytes
-            .write_all(&[19_u8])
+        Write::write_all(&mut concatenated_bytes, &[19_u8])
             .expect("Failed to write number of bytes");
         concatenated_bytes.extend_from_slice("BitTorrent protocol00000000".as_bytes());
         concatenated_bytes.extend_from_slice(info_hash);
@@ -211,7 +292,7 @@ impl PeerConnection {
         Ok(())
     }
 
-    fn request(&mut self, piece_index:u32, piece_offset:u32) -> Result<()> {
+    fn request(&mut self, piece_index: u32, piece_offset: u32) -> Result<()> {
         let message = Message::request(piece_index, piece_offset);
         if let Some(connection) = &mut self.connection {
             connection.write_all(&message)?;

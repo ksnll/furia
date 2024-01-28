@@ -62,7 +62,8 @@ impl Message {
         let len = bitfield_size as u32 + 1;
         let mut message = Vec::from(len.to_be_bytes());
         message.push(MessageType::Bitfield as u8);
-        message.extend_from_slice(&vec![0_u8; len as usize * 4]);
+        message.extend_from_slice(&vec![0_u8; len as usize]);
+        dbg!(hex::encode(&message));
         message
     }
 
