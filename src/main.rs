@@ -34,7 +34,7 @@ async fn main() -> Result<()> {
 
     let mut connection_manager = ConnectionManager::new(torrent, download, &peer_id).await;
 
-    for peer in tracker_response.peers.into_iter().take(5) {
+    for peer in tracker_response.peers.into_iter() {
         connection_manager.add_peer(peer)?;
     }
     // connection_manager.connect_to_peers()?;

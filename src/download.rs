@@ -1,4 +1,4 @@
-use crate::{parse_torrent::TorrentFile, messages::BLOCK_BYTES};
+use crate::{messages::BLOCK_BYTES, parse_torrent::TorrentFile};
 
 #[derive(Debug, Clone)]
 pub enum PieceStatus {
@@ -18,7 +18,7 @@ pub enum Block {
 
 #[derive(Debug, Clone)]
 pub struct Piece {
-    pub content: Option<Vec<Block>>,
+    pub content: Vec<Block>,
     pub status: PieceStatus,
     pub original_sha1: Vec<u8>,
 }
@@ -36,7 +36,11 @@ impl Download {
                 .pieces
                 .chunks(20)
                 .map(|sha1| Piece {
-                    content: None,
+                    content: vec![
+                        Block::NotStarted;
+                        (torrent.info.piece_length as u32 / BLOCK_BYTES)
+                            as usize
+                    ],
                     original_sha1: sha1.to_owned(),
                     status: PieceStatus::NotStarted,
                 })
@@ -46,14 +50,11 @@ impl Download {
 
     pub fn find_first_block(&self) -> Option<(usize, usize)> {
         for (piece_index, piece) in self.pieces.iter().enumerate() {
-            if let Some(blocks) = &piece.content {
-                for (block_index, block) in blocks.iter().enumerate() {
+                for (block_index, block) in piece.content.iter().enumerate() {
                     if *block == Block::NotStarted {
+                        dbg!("Found first block", piece_index, block_index);
                         return Some((piece_index, block_index));
                     }
-                }
-            } else {
-                return Some((piece_index, 0));
             }
         }
         None
