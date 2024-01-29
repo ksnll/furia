@@ -52,7 +52,6 @@ impl Download {
         for (piece_index, piece) in self.pieces.iter().enumerate() {
                 for (block_index, block) in piece.content.iter().enumerate() {
                     if *block == Block::NotStarted {
-                        dbg!("Found first block", piece_index, block_index);
                         return Some((piece_index, block_index));
                     }
             }

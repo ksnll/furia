@@ -2,12 +2,14 @@ use anyhow::Result;
 use sha1::{Digest, Sha1};
 use std::{
     io::{Read, SeekFrom, Write},
-    sync::Arc, thread,
+    sync::Arc,
+    thread,
 };
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncSeekExt, AsyncWriteExt, AsyncReadExt},
-    sync::Mutex, net::TcpStream,
+    io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
+    net::TcpStream,
+    sync::Mutex,
 };
 
 use crate::{
@@ -31,7 +33,7 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    pub async fn new(torrent: TorrentFile, download: Download, peer_id: &str) -> Self {
+    pub async fn new(torrent: TorrentFile, mut download: Download, peer_id: &str) -> Self {
         let filename = &torrent.info.name.clone();
         let mut file = OpenOptions::new()
             .create(true)
@@ -40,9 +42,25 @@ impl ConnectionManager {
             .open(filename)
             .await
             .unwrap();
-        file.write_all(&vec![0; torrent.info.length.unwrap() as usize])
-            .await
-            .unwrap();
+
+        let mut piece = vec![0; torrent.info.piece_length as usize];
+        let mut piece_checking = 0;
+        while let Ok(_) = file.read_exact(&mut piece).await {
+            let mut hasher = Sha1::new();
+            hasher.update(&piece);
+            let info_hash = hasher.finalize();
+            if info_hash.as_slice() == Download::from(&torrent).pieces[piece_checking].original_sha1.as_slice() {
+                download.pieces[piece_checking].status = PieceStatus::ShaVerified;
+                download.pieces[piece_checking].content = piece
+                    .chunks(BLOCK_BYTES as usize)
+                    .map(|block| Block::Downloaded(block.try_into().unwrap()))
+                    .collect();
+            } else {
+                download.pieces[piece_checking].status = PieceStatus::NotStarted;
+            }
+            piece_checking += 1;
+        }
+
         let file = Arc::new(Mutex::new(file));
 
         Self {
@@ -129,7 +147,8 @@ impl ConnectionManager {
                                             Block::Downloading;
                                         drop(download);
                                         peer_connection
-                                            .request(piece as u32, block as u32).await
+                                            .request(piece as u32, block as u32)
+                                            .await
                                             .unwrap();
                                     }
                                     4 => {
@@ -181,17 +200,12 @@ impl ConnectionManager {
                                                     PieceStatus::ShaVerified;
 
                                                 let mut file = file.lock().await;
-                                                dbg!("write to file");
-                                                if piece_index != 0 {
-                                                    file.seek(SeekFrom::Start(
-                                                        (piece_index as i64
-                                                            * torrent.info.piece_length)
-                                                            as u64,
-                                                    ))
-                                                    .await
-                                                    .unwrap();
-                                                }
-                                                dbg!("file seek successful");
+                                                file.seek(SeekFrom::Start(
+                                                    (piece_index as i64 * torrent.info.piece_length)
+                                                        as u64,
+                                                ))
+                                                .await
+                                                .unwrap();
                                                 file.write_all(&data).await.unwrap();
                                                 file.flush().await.unwrap();
                                             } else {
@@ -212,10 +226,6 @@ impl ConnectionManager {
                                             .request(piece as u32, block as u32)
                                             .await
                                             .unwrap();
-                                        println!(
-                                            "Block {} {} downloaded from peer {}",
-                                            &piece_index, &piece_offset, &peer_connection.peer.ip
-                                        );
                                     }
                                     20 => {
                                         println!("Extended");
@@ -260,7 +270,8 @@ impl PeerConnection {
     }
 
     async fn connect(&mut self) -> Result<()> {
-        let connection = TcpStream::connect(format!("{}:{}", &self.peer.ip, &self.peer.port)).await?;
+        let connection =
+            TcpStream::connect(format!("{}:{}", &self.peer.ip, &self.peer.port)).await?;
         self.connection = Some(connection);
         Ok(())
     }
