@@ -2,13 +2,12 @@ use anyhow::Result;
 use sha1::{Digest, Sha1};
 use std::{
     io::{Read, SeekFrom, Write},
-    net::TcpStream,
-    sync::Arc,
+    sync::Arc, thread,
 };
 use tokio::{
     fs::{File, OpenOptions},
-    io::{AsyncSeekExt, AsyncWriteExt},
-    sync::Mutex,
+    io::{AsyncSeekExt, AsyncWriteExt, AsyncReadExt},
+    sync::Mutex, net::TcpStream,
 };
 
 use crate::{
@@ -76,11 +75,11 @@ impl ConnectionManager {
             let peer_id = peer_id.clone();
             let file = file.clone();
             let task = tokio::spawn(async move {
-                if let Err(e) = peer_connection.connect() {
+                if let Err(e) = peer_connection.connect().await {
                     println!("Failed to connect to peer: {}", e);
                     return;
                 }
-                if let Err(e) = peer_connection.handshake(&info_hash, &peer_id) {
+                if let Err(e) = peer_connection.handshake(&info_hash, &peer_id).await {
                     println!("Failed to handshake to peer: {}", e);
                     return;
                 }
@@ -90,7 +89,7 @@ impl ConnectionManager {
                 //     return;
                 // }
 
-                if let Err(e) = peer_connection.interested() {
+                if let Err(e) = peer_connection.interested().await {
                     println!("Failed to send interest message to peer: {}", e);
                     return;
                 }
@@ -98,7 +97,7 @@ impl ConnectionManager {
                 loop {
                     let mut len = Vec::new();
                     if let Some(connection) = peer_connection.connection.as_mut() {
-                        match connection.take(4).read_to_end(&mut len) {
+                        match connection.take(4).read_to_end(&mut len).await {
                             Ok(_) => {
                                 if len.len() != 4 {
                                     println!(
@@ -110,9 +109,9 @@ impl ConnectionManager {
                                 let length = u32::from_be_bytes(len.try_into().unwrap());
                                 let mut message = vec![0; length as usize];
 
-                                connection.read_exact(&mut message).unwrap();
+                                connection.read_exact(&mut message).await.unwrap();
                                 if length == 0 {
-                                    peer_connection.keep_alive().unwrap();
+                                    peer_connection.keep_alive().await.unwrap();
                                     continue;
                                 }
                                 let message_id = message[0];
@@ -130,7 +129,7 @@ impl ConnectionManager {
                                             Block::Downloading;
                                         drop(download);
                                         peer_connection
-                                            .request(piece as u32, block as u32)
+                                            .request(piece as u32, block as u32).await
                                             .unwrap();
                                     }
                                     4 => {
@@ -139,7 +138,7 @@ impl ConnectionManager {
                                     5 => {
                                         println!("Bitfield from peer {}", &peer_connection.peer.ip);
                                         peer_connection.bitfield = message[1..].to_vec();
-                                        peer_connection.interested().unwrap();
+                                        peer_connection.interested().await.unwrap();
                                     }
                                     7 => {
                                         let piece_index =
@@ -211,6 +210,7 @@ impl ConnectionManager {
                                         drop(download);
                                         peer_connection
                                             .request(piece as u32, block as u32)
+                                            .await
                                             .unwrap();
                                         println!(
                                             "Block {} {} downloaded from peer {}",
@@ -259,13 +259,13 @@ impl PeerConnection {
         })
     }
 
-    fn connect(&mut self) -> Result<()> {
-        let connection = TcpStream::connect(format!("{}:{}", &self.peer.ip, &self.peer.port))?;
+    async fn connect(&mut self) -> Result<()> {
+        let connection = TcpStream::connect(format!("{}:{}", &self.peer.ip, &self.peer.port)).await?;
         self.connection = Some(connection);
         Ok(())
     }
 
-    fn handshake(&mut self, info_hash: &[u8; 20], peer_id: &str) -> Result<()> {
+    async fn handshake(&mut self, info_hash: &[u8; 20], peer_id: &str) -> Result<()> {
         let mut concatenated_bytes = Vec::new();
         Write::write_all(&mut concatenated_bytes, &[19_u8])
             .expect("Failed to write number of bytes");
@@ -273,17 +273,17 @@ impl PeerConnection {
         concatenated_bytes.extend_from_slice(info_hash);
         concatenated_bytes.extend_from_slice(&peer_id.as_bytes());
         if let Some(connection) = &mut self.connection {
-            connection.write_all(&concatenated_bytes)?;
+            connection.write_all(&concatenated_bytes).await?;
             let mut len = [0_u8; 1];
-            connection.read_exact(&mut len)?;
+            connection.read_exact(&mut len).await?;
             let mut message = vec![0; len[0] as usize];
-            connection.read_exact(&mut message)?;
+            connection.read_exact(&mut message).await?;
             let mut reserved = [0_u8; 8];
-            connection.read_exact(&mut reserved)?;
+            connection.read_exact(&mut reserved).await?;
             let mut info_hash = [0_u8; 20];
             let mut peer_id = [0_u8; 20];
-            connection.read_exact(&mut info_hash)?;
-            connection.read_exact(&mut peer_id)?;
+            connection.read_exact(&mut info_hash).await?;
+            connection.read_exact(&mut peer_id).await?;
         } else {
             dbg!("Failed to establish connection");
         }
@@ -291,34 +291,34 @@ impl PeerConnection {
         Ok(())
     }
 
-    fn bitfield(&mut self, torrent: &TorrentFile, download: &Download) -> Result<()> {
+    async fn bitfield(&mut self, torrent: &TorrentFile, download: &Download) -> Result<()> {
         let message = Message::bitfield(&torrent, &download);
         if let Some(connection) = &mut self.connection {
-            connection.write_all(&message)?;
+            connection.write_all(&message).await?;
         }
         Ok(())
     }
 
-    fn keep_alive(&mut self) -> Result<()> {
+    async fn keep_alive(&mut self) -> Result<()> {
         let message = Message::keep_alive();
         if let Some(connection) = &mut self.connection {
-            connection.write_all(&message)?;
+            connection.write_all(&message).await?;
         }
         Ok(())
     }
 
-    fn interested(&mut self) -> Result<()> {
+    async fn interested(&mut self) -> Result<()> {
         let message = Message::interested();
         if let Some(connection) = &mut self.connection {
-            connection.write_all(&message)?;
+            connection.write_all(&message).await?;
         }
         Ok(())
     }
 
-    fn request(&mut self, piece_index: u32, piece_offset: u32) -> Result<()> {
+    async fn request(&mut self, piece_index: u32, piece_offset: u32) -> Result<()> {
         let message = Message::request(piece_index, piece_offset);
         if let Some(connection) = &mut self.connection {
-            connection.write_all(&message)?;
+            connection.write_all(&message).await?;
         }
         Ok(())
     }
