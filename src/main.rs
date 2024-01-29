@@ -1,15 +1,16 @@
-mod parse_torrent;
-mod tracker;
-mod peers;
 mod messages;
+mod parse_torrent;
+mod peers;
+mod tracker;
 use crate::download::Download;
-use std::env;
-use parse_torrent::parse_torrent;
-use rand::{distributions::Alphanumeric, Rng};
-use tracker::request_tracker;
-use peers::ConnectionManager;
 use anyhow::Result;
-
+use parse_torrent::parse_torrent;
+use peers::ConnectionManager;
+use rand::{distributions::Alphanumeric, Rng};
+use std::{env};
+use tracker::request_tracker;
+use futures::future;  
+//
 pub mod download;
 
 #[tokio::main]
@@ -22,13 +23,13 @@ async fn main() -> Result<()> {
     let torrent = parse_torrent(&args[1]);
 
     let peer_id = format!(
-            "-FU0001-{}",
-            rand::thread_rng()
-                .sample_iter(&Alphanumeric)
-                .take(12)
-                .map(char::from)
-                .collect::<String>()
-        );
+        "-FU0001-{}",
+        rand::thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(12)
+            .map(char::from)
+            .collect::<String>()
+    );
     let tracker_response = request_tracker(&torrent, &peer_id).await?;
     let download = Download::from(&torrent);
 
@@ -39,9 +40,7 @@ async fn main() -> Result<()> {
     }
     // connection_manager.connect_to_peers()?;
     let tasks = connection_manager.handle_messages().await?;
-    for task in tasks {
-        task.await?;
-    }
+    future::join_all(tasks).await;
 
     Ok(())
 }

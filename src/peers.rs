@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use sha1::{Digest, Sha1};
 use std::{
     io::{Read, SeekFrom, Write},
@@ -34,19 +34,24 @@ pub struct ConnectionManager {
 impl ConnectionManager {
     pub async fn new(torrent: TorrentFile, download: Download, peer_id: &str) -> Self {
         let filename = &torrent.info.name.clone();
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(filename)
+            .await
+            .unwrap();
+        file.write_all(&vec![0; torrent.info.length.unwrap() as usize])
+            .await
+            .unwrap();
+        let file = Arc::new(Mutex::new(file));
+
         Self {
             torrent: Arc::new(torrent),
             download: Arc::new(Mutex::new(download)),
             peer_connections: Vec::new(),
             peer_id: peer_id.to_owned(),
-            file: Arc::new(Mutex::new(
-                OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .open(filename)
-                    .await
-                    .unwrap(),
-            )),
+            file,
         }
     }
 
@@ -119,8 +124,11 @@ impl ConnectionManager {
                                     1 => {
                                         println!("Unchoke from peer {}", &peer_connection.peer.ip);
                                         peer_connection.am_status = Some(PeerStatus::Interested);
-                                        let download = download.lock().await;
+                                        let mut download = download.lock().await;
                                         let (piece, block) = download.find_first_block().unwrap();
+                                        download.pieces[piece as usize].content[block as usize] =
+                                            Block::Downloading;
+                                        drop(download);
                                         peer_connection
                                             .request(piece as u32, block as u32)
                                             .unwrap();
@@ -140,19 +148,16 @@ impl ConnectionManager {
                                             u32::from_be_bytes(message[5..9].try_into().unwrap());
                                         let block = &message[9..];
                                         let mut download = download.lock().await;
-                                        download.pieces[piece_index as usize]
-                                            .content
+                                        download.pieces[piece_index as usize].content
                                             [(piece_offset / BLOCK_BYTES) as usize] =
                                             Block::Downloaded(block.try_into().unwrap());
 
-                                        if download.pieces[piece_index as usize]
-                                            .content
-                                            .iter()
-                                            .all(|block| {
+                                        if download.pieces[piece_index as usize].content.iter().all(
+                                            |block| {
                                                 *block != Block::NotStarted
                                                     && *block != Block::Downloading
-                                            })
-                                        {
+                                            },
+                                        ) {
                                             download.pieces[piece_index as usize].status =
                                                 PieceStatus::Downloaded;
                                             let data = download.pieces[piece_index as usize]
@@ -177,14 +182,17 @@ impl ConnectionManager {
                                                     PieceStatus::ShaVerified;
 
                                                 let mut file = file.lock().await;
-                                                dbg!("starting to seek top pos {}", );
-                                                file.seek(SeekFrom::Start(
-                                                    (piece_index as i64 * torrent.info.piece_length)
-                                                        as u64,
-                                                ))
-                                                .await
-                                                .unwrap();
-                                                dbg!("end seek");
+                                                dbg!("write to file");
+                                                if piece_index != 0 {
+                                                    file.seek(SeekFrom::Start(
+                                                        (piece_index as i64
+                                                            * torrent.info.piece_length)
+                                                            as u64,
+                                                    ))
+                                                    .await
+                                                    .unwrap();
+                                                }
+                                                dbg!("file seek successful");
                                                 file.write_all(&data).await.unwrap();
                                                 file.flush().await.unwrap();
                                             } else {
@@ -200,6 +208,7 @@ impl ConnectionManager {
                                         let (piece, block) = download.find_first_block().unwrap();
                                         download.pieces[piece as usize].content[block as usize] =
                                             Block::Downloading;
+                                        drop(download);
                                         peer_connection
                                             .request(piece as u32, block as u32)
                                             .unwrap();
