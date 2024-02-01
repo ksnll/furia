@@ -104,7 +104,7 @@ mod test {
     fn request_message() {
         assert_eq!(
             Message::request(0, 0),
-            vec![0x00, 0x00, 0x00, 0x0D, 0x06, 0x00, 0x00, 0x0C]
+            vec![0, 0, 0, 13, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 64, 0]
         );
     }
 }

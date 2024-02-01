@@ -7,10 +7,10 @@ use anyhow::Result;
 use parse_torrent::parse_torrent;
 use peers::ConnectionManager;
 use rand::{distributions::Alphanumeric, Rng};
-use std::{env};
+use std::env;
 use tracker::request_tracker;
 use futures::future;  
-//
+
 pub mod download;
 
 #[tokio::main]
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
     for peer in tracker_response.peers.into_iter() {
         connection_manager.add_peer(peer)?;
     }
-    // connection_manager.connect_to_peers()?;
+
     let tasks = connection_manager.handle_messages().await?;
     future::join_all(tasks).await;
 

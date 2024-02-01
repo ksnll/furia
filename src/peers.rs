@@ -1,9 +1,8 @@
 use anyhow::Result;
-use sha1::{Digest, Sha1};
+use num_traits::FromPrimitive;
 use std::{
-    io::{Read, SeekFrom, Write},
+    io::{SeekFrom, Write},
     sync::Arc,
-    thread,
 };
 use tokio::{
     fs::{File, OpenOptions},
@@ -11,7 +10,6 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
 };
-use num_traits::FromPrimitive;
 
 use crate::{
     download::{Block, Download, PieceStatus},
@@ -44,32 +42,12 @@ impl ConnectionManager {
             .await
             .unwrap();
 
-        let mut download = Download::from(&torrent);
         let mut piece = vec![0; torrent.info.piece_length as usize];
         let mut piece_checking = 0;
-        let mut verified = 0;
 
         while let Ok(_) = file.read_exact(&mut piece).await {
-            let mut hasher = Sha1::new();
-            hasher.update(&piece);
-            let info_hash = hasher.finalize();
-            if info_hash.as_slice() == download.pieces[piece_checking].original_sha1.as_slice() {
-                verified += 1;
-                download.pieces[piece_checking].status = PieceStatus::ShaVerified;
-                download.pieces[piece_checking].content = piece
-                    .chunks(BLOCK_BYTES as usize)
-                    .map(|block| Block::Downloaded(block.try_into().unwrap()))
-                    .collect();
-            } else {
-                println!("Found a corrupted piece {}", piece_checking);
-                download.pieces[piece_checking].status = PieceStatus::NotStarted;
-            }
+            download.set_piece(&piece, piece_checking);
             piece_checking += 1;
-        }
-
-        if verified == torrent.info.pieces.len() / 20 {
-            println!("Download complete");
-            std::process::exit(0);
         }
 
         let file = Arc::new(Mutex::new(file));
@@ -180,55 +158,22 @@ impl ConnectionManager {
                                         let piece_offset =
                                             u32::from_be_bytes(message[5..9].try_into().unwrap());
                                         let block = &message[9..];
+
                                         let mut download = download.lock().await;
-                                        download.pieces[piece_index as usize].content
-                                            [(piece_offset / BLOCK_BYTES) as usize] =
-                                            Block::Downloaded(block.try_into().unwrap());
-
-                                        if download.pieces[piece_index as usize].content.iter().all(
-                                            |block| {
-                                                *block != Block::NotStarted
-                                                    && *block != Block::Downloading
-                                            },
+                                        if let Some(data) = download.set_block(
+                                            &block,
+                                            piece_index as usize,
+                                            piece_offset as usize,
                                         ) {
-                                            download.pieces[piece_index as usize].status =
-                                                PieceStatus::Downloaded;
-                                            let data = download.pieces[piece_index as usize]
-                                                .content
-                                                .iter()
-                                                .map(|block| match block {
-                                                    Block::Downloaded(data) => data.to_vec(),
-                                                    _ => panic!("Block not downloaded"),
-                                                })
-                                                .flatten()
-                                                .collect::<Vec<u8>>();
-
-                                            let mut hasher = Sha1::new();
-                                            hasher.update(&data);
-                                            let info_hash = hasher.finalize();
-                                            if info_hash.as_slice()
-                                                == download.pieces[piece_index as usize]
-                                                    .original_sha1
-                                                    .as_slice()
-                                            {
-                                                download.pieces[piece_index as usize].status =
-                                                    PieceStatus::ShaVerified;
-
-                                                let mut file = file.lock().await;
-                                                file.seek(SeekFrom::Start(
-                                                    (piece_index as i64 * torrent.info.piece_length)
-                                                        as u64,
-                                                ))
-                                                .await
-                                                .unwrap();
-                                                file.write_all(&data).await.unwrap();
-                                                file.flush().await.unwrap();
-                                            } else {
-                                                println!("Failed to download piece");
-                                                download.pieces[piece_index as usize].status =
-                                                    PieceStatus::NotStarted;
-                                            }
-
+                                            let mut file = file.lock().await;
+                                            file.seek(SeekFrom::Start(
+                                                (piece_index as i64 * torrent.info.piece_length)
+                                                    as u64,
+                                            ))
+                                            .await
+                                            .unwrap();
+                                            file.write_all(&data).await.unwrap();
+                                            file.flush().await.unwrap();
                                             println!(
                                                 "Piece {} downloaded from peer {}",
                                                 &piece_index, &peer_connection.peer.ip
