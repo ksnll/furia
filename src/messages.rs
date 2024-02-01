@@ -2,12 +2,14 @@ use crate::{
     download::Download,
     parse_torrent::{bitfield_size, TorrentFile},
 };
+use num_derive::FromPrimitive;
 
 pub struct Message {}
 
 pub const BLOCK_BYTES: u32 = 16384;
 
 #[repr(u8)]
+#[derive(FromPrimitive)]
 pub enum MessageType {
     Choke,
     Unchoke,
@@ -19,7 +21,8 @@ pub enum MessageType {
     Piece,
     Cancel,
     Port,
-    KeepAlive
+    KeepAlive,
+    Extended = 20
 }
 
 impl Message {

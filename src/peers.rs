@@ -11,10 +11,11 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
 };
+use num_traits::FromPrimitive;
 
 use crate::{
     download::{Block, Download, PieceStatus},
-    messages::{Message, BLOCK_BYTES},
+    messages::{Message, MessageType, BLOCK_BYTES},
     parse_torrent::TorrentFile,
     tracker::{get_info_hash, Peer},
 };
@@ -43,22 +44,32 @@ impl ConnectionManager {
             .await
             .unwrap();
 
+        let mut download = Download::from(&torrent);
         let mut piece = vec![0; torrent.info.piece_length as usize];
         let mut piece_checking = 0;
+        let mut verified = 0;
+
         while let Ok(_) = file.read_exact(&mut piece).await {
             let mut hasher = Sha1::new();
             hasher.update(&piece);
             let info_hash = hasher.finalize();
-            if info_hash.as_slice() == Download::from(&torrent).pieces[piece_checking].original_sha1.as_slice() {
+            if info_hash.as_slice() == download.pieces[piece_checking].original_sha1.as_slice() {
+                verified += 1;
                 download.pieces[piece_checking].status = PieceStatus::ShaVerified;
                 download.pieces[piece_checking].content = piece
                     .chunks(BLOCK_BYTES as usize)
                     .map(|block| Block::Downloaded(block.try_into().unwrap()))
                     .collect();
             } else {
+                println!("Found a corrupted piece {}", piece_checking);
                 download.pieces[piece_checking].status = PieceStatus::NotStarted;
             }
             piece_checking += 1;
+        }
+
+        if verified == torrent.info.pieces.len() / 20 {
+            println!("Download complete");
+            std::process::exit(0);
         }
 
         let file = Arc::new(Mutex::new(file));
@@ -133,33 +144,37 @@ impl ConnectionManager {
                                     continue;
                                 }
                                 let message_id = message[0];
-                                match message_id {
-                                    0 => {
+                                match MessageType::from_u8(message_id) {
+                                    Some(MessageType::Choke) => {
                                         println!("Choke from peer {}", &peer_connection.peer.ip);
                                         peer_connection.am_status = Some(PeerStatus::Chocked);
                                     }
-                                    1 => {
+                                    Some(MessageType::Unchoke) => {
                                         println!("Unchoke from peer {}", &peer_connection.peer.ip);
                                         peer_connection.am_status = Some(PeerStatus::Interested);
                                         let mut download = download.lock().await;
-                                        let (piece, block) = download.find_first_block().unwrap();
-                                        download.pieces[piece as usize].content[block as usize] =
-                                            Block::Downloading;
-                                        drop(download);
-                                        peer_connection
-                                            .request(piece as u32, block as u32)
-                                            .await
-                                            .unwrap();
+                                        if let Some((piece, block)) = download.find_first_block() {
+                                            download.pieces[piece as usize].content
+                                                [block as usize] = Block::Downloading;
+                                            drop(download);
+                                            peer_connection
+                                                .request(piece as u32, block as u32)
+                                                .await
+                                                .unwrap();
+                                        } else {
+                                            println!("Download complete");
+                                            break;
+                                        }
                                     }
-                                    4 => {
+                                    Some(MessageType::Have) => {
                                         println!("Have");
                                     }
-                                    5 => {
+                                    Some(MessageType::Bitfield) => {
                                         println!("Bitfield from peer {}", &peer_connection.peer.ip);
                                         peer_connection.bitfield = message[1..].to_vec();
                                         peer_connection.interested().await.unwrap();
                                     }
-                                    7 => {
+                                    Some(MessageType::Piece) => {
                                         let piece_index =
                                             u32::from_be_bytes(message[1..5].try_into().unwrap());
                                         let piece_offset =
@@ -209,7 +224,9 @@ impl ConnectionManager {
                                                 file.write_all(&data).await.unwrap();
                                                 file.flush().await.unwrap();
                                             } else {
-                                                download.pieces.remove(piece_index as usize);
+                                                println!("Failed to download piece");
+                                                download.pieces[piece_index as usize].status =
+                                                    PieceStatus::NotStarted;
                                             }
 
                                             println!(
@@ -218,16 +235,20 @@ impl ConnectionManager {
                                             );
                                         }
 
-                                        let (piece, block) = download.find_first_block().unwrap();
-                                        download.pieces[piece as usize].content[block as usize] =
-                                            Block::Downloading;
-                                        drop(download);
-                                        peer_connection
-                                            .request(piece as u32, block as u32)
-                                            .await
-                                            .unwrap();
+                                        if let Some((piece, block)) = download.find_first_block() {
+                                            download.pieces[piece as usize].content
+                                                [block as usize] = Block::Downloading;
+                                            drop(download);
+                                            peer_connection
+                                                .request(piece as u32, block as u32)
+                                                .await
+                                                .unwrap();
+                                        } else {
+                                            println!("Download complete");
+                                            break;
+                                        }
                                     }
-                                    20 => {
+                                    Some(MessageType::Extended) => {
                                         println!("Extended");
                                     }
                                     _ => {

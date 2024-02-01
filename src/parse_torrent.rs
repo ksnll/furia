@@ -15,7 +15,9 @@ pub struct File {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Info {
     pub name: String,
+    /// concatenation of each piece sha1 hash. Size multiple of 20 bytes
     pub pieces: ByteBuf,
+    /// number of bytes per piece
     #[serde(rename = "piece length")]
     pub piece_length: i64,
     #[serde(default)]
