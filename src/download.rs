@@ -1,7 +1,7 @@
 use crate::{messages::BLOCK_BYTES, parse_torrent::TorrentFile};
 use sha1::{Digest, Sha1};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum PieceStatus {
     NotStarted,
     Downloading,
@@ -17,7 +17,7 @@ pub enum Block {
     Downloading,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Piece {
     pub content: Vec<Block>,
     pub status: PieceStatus,
@@ -110,4 +110,18 @@ impl Download {
         }
         None
     }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::parse_torrent;
+    use super::Download;
+    
+    #[test]
+    fn it_sets_invalid_pieces(){
+        let torrent = parse_torrent("./data/ubuntu-22.04.3-live-server-amd64.iso.torrent");
+        let mut download = Download::from(&torrent);
+        download.set_piece(&vec![0; torrent.info.piece_length as usize], 0);
+        assert_eq!(download.pieces[0].status, super::PieceStatus::NotStarted);
+    } 
 }

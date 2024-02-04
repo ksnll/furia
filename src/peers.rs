@@ -299,4 +299,12 @@ impl PeerConnection {
         }
         Ok(())
     }
+    
+    async fn have(&mut self, piece_index: u32) -> Result<()> {
+        let message = Message::have(piece_index);
+        if let Some(connection) = &mut self.connection {
+            connection.write_all(&message).await?;
+        }
+        Ok(())
+    }
 }

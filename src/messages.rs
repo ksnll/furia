@@ -80,6 +80,14 @@ impl Message {
         message
     }
 
+    pub fn have(piece_index: u32) -> Vec<u8> {
+        let len = 5_u32.to_be_bytes();
+        let mut message = Vec::from(len);
+        message.push(MessageType::Have as u8);
+        message.extend_from_slice(&piece_index.to_be_bytes());
+        message
+    }
+
     pub fn piece(piece_index: u8, piece_offset: u8, block: Vec<u8>) {
         todo!();
     }
