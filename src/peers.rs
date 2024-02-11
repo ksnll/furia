@@ -10,10 +10,11 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
 };
+use tracing::{info, span, Level, error, warn};
 
 use crate::{
-    download::{Block, Download, PieceStatus},
-    messages::{Message, MessageType, BLOCK_BYTES},
+    download::{Block, Download},
+    messages::{Message, MessageType},
     parse_torrent::TorrentFile,
     tracker::{get_info_hash, Peer},
 };
@@ -73,21 +74,23 @@ impl ConnectionManager {
         let peer_id = self.peer_id.clone();
         let info_hash = get_info_hash(&torrent.info)?;
         let file = self.file.clone();
-        println!("Number of peers: {}", &self.peer_connections.len());
+        info!("Number of peers: {}", &self.peer_connections.len());
         let mut tasks = Vec::new();
         for mut peer_connection in self.peer_connections {
-            println!("Connecting to peer: {}", &peer_connection.peer.ip);
+            info!("Connecting to peer");
             let download = download.clone();
             let torrent = torrent.clone();
             let peer_id = peer_id.clone();
             let file = file.clone();
+            let span = span!(Level::INFO, "peer", ip = peer_connection.peer.ip);
             let task = tokio::spawn(async move {
+                let _guard = span.enter();
                 if let Err(e) = peer_connection.connect().await {
-                    println!("Failed to connect to peer: {}", e);
+                    warn!(?e, "Failed to connect to peer");
                     return;
                 }
                 if let Err(e) = peer_connection.handshake(&info_hash, &peer_id).await {
-                    println!("Failed to handshake to peer: {}", e);
+                    warn!(?e, "Failed to handshake to peer");
                     return;
                 }
 
@@ -97,7 +100,7 @@ impl ConnectionManager {
                 // }
 
                 if let Err(e) = peer_connection.interested().await {
-                    println!("Failed to send interest message to peer: {}", e);
+                    info!("Failed to send interest message to peer: {}", e);
                     return;
                 }
 
@@ -107,10 +110,7 @@ impl ConnectionManager {
                         match connection.take(4).read_to_end(&mut len).await {
                             Ok(_) => {
                                 if len.len() != 4 {
-                                    println!(
-                                        "Failed to read data from peer {}",
-                                        &peer_connection.peer.ip
-                                    );
+                                    info!("Failed to read data from peer");
                                     return;
                                 }
                                 let length = u32::from_be_bytes(len.try_into().unwrap());
@@ -124,11 +124,11 @@ impl ConnectionManager {
                                 let message_id = message[0];
                                 match MessageType::from_u8(message_id) {
                                     Some(MessageType::Choke) => {
-                                        println!("Choke from peer {}", &peer_connection.peer.ip);
+                                        info!("Choke");
                                         peer_connection.am_status = Some(PeerStatus::Chocked);
                                     }
                                     Some(MessageType::Unchoke) => {
-                                        println!("Unchoke from peer {}", &peer_connection.peer.ip);
+                                        info!("Unchoke");
                                         peer_connection.am_status = Some(PeerStatus::Interested);
                                         let mut download = download.lock().await;
                                         if let Some((piece, block)) = download.find_first_block() {
@@ -140,15 +140,15 @@ impl ConnectionManager {
                                                 .await
                                                 .unwrap();
                                         } else {
-                                            println!("Download complete");
+                                            info!("Download complete");
                                             break;
                                         }
                                     }
                                     Some(MessageType::Have) => {
-                                        println!("Have");
+                                        info!("Have");
                                     }
                                     Some(MessageType::Bitfield) => {
-                                        println!("Bitfield from peer {}", &peer_connection.peer.ip);
+                                        info!("Bitfield");
                                         peer_connection.bitfield = message[1..].to_vec();
                                         peer_connection.interested().await.unwrap();
                                     }
@@ -174,10 +174,7 @@ impl ConnectionManager {
                                             .unwrap();
                                             file.write_all(&data).await.unwrap();
                                             file.flush().await.unwrap();
-                                            println!(
-                                                "Piece {} downloaded from peer {}",
-                                                &piece_index, &peer_connection.peer.ip
-                                            );
+                                            info!("Piece {} downloaded", &piece_index);
                                         }
 
                                         if let Some((piece, block)) = download.find_first_block() {
@@ -189,21 +186,21 @@ impl ConnectionManager {
                                                 .await
                                                 .unwrap();
                                         } else {
-                                            println!("Download complete");
+                                            info!("Download complete");
                                             break;
                                         }
                                     }
                                     Some(MessageType::Extended) => {
-                                        println!("Extended");
+                                        info!("Extended");
                                     }
                                     _ => {
-                                        println!("Unknown message, {}", &message_id);
+                                        info!("Unknown message, {}", &message_id);
                                         dbg!(String::from_utf8_lossy(&message));
                                     }
                                 }
                             }
                             Err(error) => {
-                                dbg!("Failed to read data from the peer: {}", error);
+                                error!("Failed to read data from the peer: {}", error);
                                 break;
                             }
                         }
@@ -262,7 +259,7 @@ impl PeerConnection {
             connection.read_exact(&mut info_hash).await?;
             connection.read_exact(&mut peer_id).await?;
         } else {
-            dbg!("Failed to establish connection");
+            error!("Failed to establish connection");
         }
 
         Ok(())
@@ -299,7 +296,7 @@ impl PeerConnection {
         }
         Ok(())
     }
-    
+
     async fn have(&mut self, piece_index: u32) -> Result<()> {
         let message = Message::have(piece_index);
         if let Some(connection) = &mut self.connection {

@@ -53,6 +53,7 @@ mod peer_list {
     use super::Peer;
     use serde::{Deserialize, Deserializer};
     use serde_bytes::{ByteArray, ByteBuf};
+    use tracing::info;
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Peer>, D::Error>
     where
@@ -72,7 +73,7 @@ mod peer_list {
                 });
             }
         }
-        println!("Found {} peers", peers.len());
+        info!("Found {} peers", peers.len());
         Ok(peers)
     }
 }

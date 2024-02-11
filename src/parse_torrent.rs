@@ -67,8 +67,6 @@ pub fn parse_torrent(file_path: &str) -> TorrentFile {
 pub fn bitfield_size(torrent: &TorrentFile) -> u32 {
     let number_of_pieces = ((torrent.info.length.unwrap() + torrent.info.piece_length - 1)
         / torrent.info.piece_length) as usize;
-    dbg!(number_of_pieces);
-    dbg!(((number_of_pieces + 7) / 8) as u32);
     ((number_of_pieces + 7) / 8) as u32
 
 }

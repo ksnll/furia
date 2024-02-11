@@ -1,5 +1,6 @@
 use crate::{messages::BLOCK_BYTES, parse_torrent::TorrentFile};
 use sha1::{Digest, Sha1};
+use tracing::warn;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PieceStatus {
@@ -71,7 +72,7 @@ impl Download {
                 .map(|block| Block::Downloaded(block.try_into().unwrap()))
                 .collect();
         } else {
-            println!("Data not valid for piece {}", piece_index);
+            warn!("Data not valid for piece {}", piece_index);
             self.pieces[piece_index].status = PieceStatus::NotStarted;
         }
     }
@@ -103,7 +104,7 @@ impl Download {
                 self.pieces[piece_index as usize].status = PieceStatus::ShaVerified;
                 return Some(data)
             } else {
-                println!("Failed to download piece");
+                warn!("Failed to download piece");
                 self.pieces[piece_index as usize].status = PieceStatus::NotStarted;
                 return None
             };

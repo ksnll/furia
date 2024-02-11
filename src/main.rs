@@ -10,6 +10,7 @@ use rand::{distributions::Alphanumeric, Rng};
 use std::env;
 use tracker::request_tracker;
 use futures::future;  
+use tracing_subscriber;
 
 pub mod download;
 
@@ -20,6 +21,7 @@ async fn main() -> Result<()> {
         println!("Usage: {} <torrent file>", args[0]);
         return Ok(());
     }
+    tracing_subscriber::fmt::init();
     let torrent = parse_torrent(&args[1]);
 
     let peer_id = format!(
