@@ -22,7 +22,7 @@ pub enum MessageType {
     Cancel,
     Port,
     KeepAlive,
-    Extended = 20
+    Extended = 20,
 }
 
 impl Message {
@@ -60,9 +60,9 @@ impl Message {
     }
 
     pub fn bitfield(torrent: &TorrentFile, download: &Download) -> Vec<u8> {
-        let bitfield_size = bitfield_size(&torrent);
+        let bitfield_size = bitfield_size(torrent);
 
-        let len = bitfield_size as u32 + 1;
+        let len = bitfield_size + 1;
         let mut message = Vec::from(len.to_be_bytes());
         message.push(MessageType::Bitfield as u8);
         message.extend_from_slice(&vec![0_u8; len as usize]);
@@ -75,7 +75,7 @@ impl Message {
         let mut message = Vec::from(len);
         message.push(MessageType::Request as u8);
         message.extend_from_slice(&piece_index.to_be_bytes());
-        message.extend_from_slice(&(piece_offset * BLOCK_BYTES as u32).to_be_bytes());
+        message.extend_from_slice(&(piece_offset * BLOCK_BYTES).to_be_bytes());
         message.extend_from_slice(&BLOCK_BYTES.to_be_bytes());
         message
     }

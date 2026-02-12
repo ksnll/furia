@@ -14,7 +14,7 @@ pub enum PieceStatus {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     NotStarted,
-    Downloaded([u8; BLOCK_BYTES as usize]),
+    Downloaded(Vec<u8>),
     Downloading,
 }
 
@@ -60,16 +60,16 @@ impl Download {
         None
     }
 
-    pub fn set_piece(&mut self, data: &[u8], piece_index: usize) -> () {
+    pub fn set_piece(&mut self, data: &[u8], piece_index: usize) {
         let mut hasher = Sha1::new();
-        hasher.update(&data);
+        hasher.update(data);
         let info_hash = hasher.finalize();
 
         if info_hash.as_slice() == self.pieces[piece_index].original_sha1.as_slice() {
             self.pieces[piece_index].status = PieceStatus::ShaVerified;
             self.pieces[piece_index].content = data
                 .chunks(BLOCK_BYTES as usize)
-                .map(|block| Block::Downloaded(block.try_into().unwrap()))
+                .map(|block| Block::Downloaded(block.into()))
                 .collect();
         } else {
             warn!("Data not valid for piece {}", piece_index);
@@ -77,36 +77,41 @@ impl Download {
         }
     }
 
-    pub fn set_block(&mut self, data: &[u8], piece_index: usize, piece_offset: usize) -> Option<Vec<u8>> {
-        self.pieces[piece_index as usize].content[piece_offset / BLOCK_BYTES as usize] =
-            Block::Downloaded(data.try_into().unwrap());
+    pub fn set_block(
+        &mut self,
+        data: &[u8],
+        piece_index: usize,
+        piece_offset: usize,
+    ) -> Option<Vec<u8>> {
+        self.pieces[piece_index].content[piece_offset / BLOCK_BYTES as usize] =
+            Block::Downloaded(data.into());
 
-        if self.pieces[piece_index as usize]
+        if self.pieces[piece_index]
             .content
             .iter()
             .all(|block| *block != Block::NotStarted && *block != Block::Downloading)
         {
-            self.pieces[piece_index as usize].status = PieceStatus::Downloaded;
-            let data = self.pieces[piece_index as usize]
+            self.pieces[piece_index].status = PieceStatus::Downloaded;
+            let data = self.pieces[piece_index]
                 .content
                 .iter()
-                .map(|block| match block {
+                .flat_map(|block| match block {
                     Block::Downloaded(data) => data.to_vec(),
                     _ => panic!("Block not downloaded"),
                 })
-                .flatten()
                 .collect::<Vec<u8>>();
 
             let mut hasher = Sha1::new();
             hasher.update(&data);
             let info_hash = hasher.finalize();
-            if info_hash.as_slice() == self.pieces[piece_index as usize].original_sha1.as_slice() {
-                self.pieces[piece_index as usize].status = PieceStatus::ShaVerified;
-                return Some(data)
+            if info_hash.as_slice() == self.pieces[piece_index].original_sha1.as_slice() {
+                self.pieces[piece_index].status = PieceStatus::ShaVerified;
+                return Some(data);
             } else {
                 warn!("Failed to download piece");
-                self.pieces[piece_index as usize].status = PieceStatus::NotStarted;
-                return None
+                self.pieces[piece_index].status = PieceStatus::NotStarted;
+                self.pieces[piece_index].content.fill(Block::NotStarted);
+                return None;
             };
         }
         None
@@ -115,14 +120,14 @@ impl Download {
 
 #[cfg(test)]
 mod test {
-    use crate::parse_torrent;
     use super::Download;
-    
+    use crate::parse_torrent;
+
     #[test]
-    fn it_sets_invalid_pieces(){
+    fn it_sets_invalid_pieces() {
         let torrent = parse_torrent("./data/ubuntu-22.04.3-live-server-amd64.iso.torrent");
         let mut download = Download::from(&torrent);
         download.set_piece(&vec![0; torrent.info.piece_length as usize], 0);
         assert_eq!(download.pieces[0].status, super::PieceStatus::NotStarted);
-    } 
+    }
 }
