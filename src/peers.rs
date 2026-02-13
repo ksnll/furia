@@ -10,10 +10,10 @@ use tokio::{
     net::TcpStream,
     sync::Mutex,
 };
-use tracing::{info, span, Level, error, warn};
+use tracing::{error, info, span, warn, Level};
 
 use crate::{
-    download::{Block, Download},
+    download::{Block, Download, PieceStatus},
     messages::{Message, MessageType},
     parse_torrent::TorrentFile,
     tracker::{get_info_hash, Peer},
@@ -37,6 +37,7 @@ impl ConnectionManager {
         let filename = &torrent.info.name.clone();
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(filename)
@@ -46,7 +47,7 @@ impl ConnectionManager {
         let mut piece = vec![0; torrent.info.piece_length as usize];
         let mut piece_checking = 0;
 
-        while let Ok(_) = file.read_exact(&mut piece).await {
+        while (file.read_exact(&mut piece).await).is_ok() {
             download.set_piece(&piece, piece_checking);
             piece_checking += 1;
         }
@@ -132,15 +133,15 @@ impl ConnectionManager {
                                         peer_connection.am_status = Some(PeerStatus::Interested);
                                         let mut download = download.lock().await;
                                         if let Some((piece, block)) = download.find_first_block() {
-                                            download.pieces[piece as usize].content
-                                                [block as usize] = Block::Downloading;
+                                            download.pieces[piece].content[block] =
+                                                Block::Downloading;
                                             drop(download);
                                             peer_connection
                                                 .request(piece as u32, block as u32)
                                                 .await
                                                 .unwrap();
                                         } else {
-                                            info!("Download complete");
+                                            info!("No new pieces to download");
                                             break;
                                         }
                                     }
@@ -161,7 +162,7 @@ impl ConnectionManager {
 
                                         let mut download = download.lock().await;
                                         if let Some(data) = download.set_block(
-                                            &block,
+                                            block,
                                             piece_index as usize,
                                             piece_offset as usize,
                                         ) {
@@ -174,18 +175,24 @@ impl ConnectionManager {
                                             .unwrap();
                                             file.write_all(&data).await.unwrap();
                                             file.flush().await.unwrap();
+                                            download.pieces[piece_index as usize].status =
+                                                PieceStatus::WrittenToDisk;
                                             info!("Piece {} downloaded", &piece_index);
                                         }
 
                                         if let Some((piece, block)) = download.find_first_block() {
-                                            download.pieces[piece as usize].content
-                                                [block as usize] = Block::Downloading;
+                                            download.pieces[piece].content[block] =
+                                                Block::Downloading;
                                             drop(download);
                                             peer_connection
                                                 .request(piece as u32, block as u32)
                                                 .await
                                                 .unwrap();
-                                        } else {
+                                        } else if download
+                                            .pieces
+                                            .iter()
+                                            .all(|piece| piece.status == PieceStatus::WrittenToDisk)
+                                        {
                                             info!("Download complete");
                                             break;
                                         }
@@ -265,8 +272,8 @@ impl PeerConnection {
         Ok(())
     }
 
-    async fn bitfield(&mut self, torrent: &TorrentFile, download: &Download) -> Result<()> {
-        let message = Message::bitfield(&torrent, &download);
+    async fn bitfield(&mut self, torrent: &TorrentFile) -> Result<()> {
+        let message = Message::bitfield(torrent);
         if let Some(connection) = &mut self.connection {
             connection.write_all(&message).await?;
         }

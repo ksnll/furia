@@ -1,7 +1,4 @@
-use crate::{
-    download::Download,
-    parse_torrent::{bitfield_size, TorrentFile},
-};
+use crate::parse_torrent::{bitfield_size, TorrentFile};
 use num_derive::FromPrimitive;
 
 pub struct Message {}
@@ -59,7 +56,7 @@ impl Message {
         message
     }
 
-    pub fn bitfield(torrent: &TorrentFile, download: &Download) -> Vec<u8> {
+    pub fn bitfield(torrent: &TorrentFile) -> Vec<u8> {
         let bitfield_size = bitfield_size(torrent);
 
         let len = bitfield_size + 1;
@@ -86,21 +83,6 @@ impl Message {
         message.push(MessageType::Have as u8);
         message.extend_from_slice(&piece_index.to_be_bytes());
         message
-    }
-
-    pub fn piece(piece_index: u8, piece_offset: u8, block: Vec<u8>) {
-        todo!();
-    }
-
-    pub fn cancel(piece_index: u8, piece_offset: u8) {
-        todo!();
-    }
-
-    pub fn port(port: u8) {
-        let len = 3_u32.to_be_bytes();
-        let mut message = Vec::from(len);
-        message.push(9_u8);
-        todo!();
     }
 }
 

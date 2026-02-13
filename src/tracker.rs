@@ -1,6 +1,5 @@
 use anyhow::Result;
 use percent_encoding::percent_encode_byte;
-use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
 use url::Url;
@@ -52,7 +51,7 @@ pub struct TrackerResponse {
 mod peer_list {
     use super::Peer;
     use serde::{Deserialize, Deserializer};
-    use serde_bytes::{ByteArray, ByteBuf};
+    use serde_bytes::ByteBuf;
     use tracing::info;
 
     pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<Peer>, D::Error>
@@ -87,7 +86,7 @@ pub fn get_info_hash(info: &Info) -> Result<[u8; 20]> {
 }
 
 pub fn get_encoded_info_hash(info: &Info) -> Result<String> {
-    let info_hash = get_info_hash(&info)?; // Vec<u8>
+    let info_hash = get_info_hash(info)?; // Vec<u8>
     let info_hash = info_hash
         .into_iter()
         .map(percent_encode_byte)

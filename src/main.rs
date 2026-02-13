@@ -1,16 +1,16 @@
+#![allow(dead_code)]
 mod messages;
 mod parse_torrent;
 mod peers;
 mod tracker;
 use crate::download::Download;
 use anyhow::Result;
+use futures::future;
 use parse_torrent::parse_torrent;
 use peers::ConnectionManager;
 use rand::{distributions::Alphanumeric, Rng};
 use std::env;
 use tracker::request_tracker;
-use futures::future;  
-use tracing_subscriber;
 
 pub mod download;
 
